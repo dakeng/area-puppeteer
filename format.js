@@ -1,6 +1,7 @@
 // 格式化数据
 const path = require('path');
 const fs = require('fs');
+const _ = require('lodash');
 const puppeteer = require('puppeteer');
 const ora = require('ora');
 const chalk = require('chalk');
@@ -9,8 +10,8 @@ const awaitTo = require('async-await-error-handling');
 const { timeout, writeFileSync } = require('./utils');
 
 const provinces = require('./provinces');
-const cities = require('./cities');
-const areas = require('./areas');
+const cities = require('./cities_2023');
+const areas = require('./areas_2023');
 const pcodes = Object.keys(provinces['86']);
 
 /** 
@@ -22,53 +23,61 @@ const pcodes = Object.keys(provinces['86']);
 */
 const filter = ['市辖区', '县', '省直辖县级行政区划', '自治区直辖县级行政区划'];
 
+const pcaacsv=['code,text,parentCode'];
+
+const pcacsv=['code,text,parentCode'];
+function pcaFillCsv(res,pcode){
+    _.forEach(res,(v,k) => {
+        pcacsv.push(`${k},${v},${pcode}`);
+    });
+}
+function pcaaFillCsv(res,pcode){
+    _.forEach(res,(v,k) => {
+        pcaacsv.push(`${k},${v},${pcode}`);
+    });
+}
 // 省市
 const pca = {
     '86': provinces['86']
 };
-// 删除港澳
-delete pca['86']['910000'];
+pcaFillCsv(provinces['86'],'86');
 
 // 省市区
 const pcaa = {
     '86': provinces['86']
 };
-
+pcaaFillCsv(provinces['86'],'86');
 // 提取行政区域 code
 const reg = /0(?=0{2,})/;
-const target = 'http://www.stats.gov.cn/tjsj/tjbz/tjyqhdmhcxhfdm/2016/#{route}.html';
+const target = 'https://www.stats.gov.cn/sj/tjbz/tjyqhdmhcxhfdm/2023/#{route}.html';
 
 const spinner = ora({
     color: 'yellow'
 });
 
 
-function formatCode (code, text = '') {
-    // 特殊处理东莞市和中山市的县区数据 code
-    if(text === '东莞市' || text === '中山市') {
-        return code.slice(0, -3);
-    }
-    const index = reg.exec(code)['index'];
-    return index > 6 ? code.slice(0, index) : code.slice(0, 6);
-}
-
 // 省市联动
 function formatPCAddress () {
     pcodes.forEach(pcode => {
-        if (pcode === '710000') {
+        if (pcode === '71') {
             // 台湾
-            pca[pcode] = provinces['710100'];
-        } else if (pcode === '910000') {
-            // 港澳
-            pca['86']['810000'] = '香港特别行政区';
-            pca['86']['820000'] = '澳门特别行政区';
-            pca['810000'] = provinces['810000'];
-            pca['820000'] = provinces['820000'];
-            // const t = provinces[pcode];
-            // Object.keys(t).forEach(item => {
-            //     pca[item] = provinces[item];
-            // });
-        } else {
+            pca['86']['71'] = provinces['71'];
+            pcaFillCsv(provinces['71'],'71');
+            pca[pcode] = provinces['7101'];
+            pcaFillCsv(provinces['7101'],'7101');
+        } else if (pcode === '81') {
+            // 香港
+            pca['86']['81'] = provinces['81'];
+            pcaFillCsv(provinces['81'],'81');
+            pca['8101'] = provinces['8101'];
+            pcaFillCsv(provinces['8101'],'8101');
+        }  else if (pcode === '82') {
+            // 澳门
+            pca['86']['82'] = provinces['82'];
+            pcaFillCsv(provinces['82'],'82');
+            pca['8201'] = provinces['8201'];
+            pcaFillCsv(provinces['8201'],'8201');
+        }else {
             const res = {};
             const pcities = cities.filter(city => city.parentCode === pcode);
             pcities.forEach(city => {
@@ -76,16 +85,18 @@ function formatPCAddress () {
                     // 用第三级区域数据补充
                     const tmps = areas.filter(area => area.parentCode === city.code);
                     tmps.forEach(tmp => {
-                        res[formatCode(tmp.code)] = tmp.text.indexOf('办事处') > -1 ? tmp.text.slice(0, -3) : tmp.text;
+                        res[tmp.code] = tmp.text.indexOf('办事处') > -1 ? tmp.text.slice(0, -3) : tmp.text;
                     })
                 } else {
-                    res[formatCode(city.code)] = city.text;
+                    res[city.code] = city.text;
                 }
             });
             pca[pcode] = res;
+            pcaFillCsv(res,pcode);
         }
     });
-    writeFileSync('pca.js', pca);
+    writeFileSync('pca_2023.js', pca);
+    // writeTextFileSync('pca.csv', pcacsv.join('\n'));
 }
 
 // 因为部分原处于第三级的区域提升到第二级，所以要重新抓取这部分区域对应的下一级区域数据
@@ -110,7 +121,7 @@ async function getAreasByCCode (page, code, text) {
         return list.map(el => {
             const t = el.innerText.split('\t');
             return {
-                code: t[0],
+                code: t[0].slice(0, 9),
                 text: t[1]
             }
         });
@@ -128,18 +139,25 @@ async function formatPCAAddress () {
     const f = filter.slice(1);
     for (let p = 0, pl = pcodes.length; p < pl; p++) {
         const pcode = pcodes[p];
-        if (pcode === '710000') {
+        if (pcode === '71') {
             // 台湾
-            pcaa[pcode] = provinces[pcode];
-            pcaa['710100'] = provinces['710100'];
-        } else if (pcode === '910000') {
-            // 港澳
-            const t = provinces[pcode];
-            pcaa[pcode] = t;
-            Object.keys(t).forEach(item => {
-                pcaa[item] = provinces[item];
-            });
-        } else {
+            pcaa['86']['71'] = provinces['71'];
+            pcaaFillCsv(provinces['71'],'71');
+            pcaa[pcode] = provinces['7101'];
+            pcaaFillCsv(provinces['7101'],'7101');
+        } else if (pcode === '81') {
+            // 香港
+            pcaa['86']['81'] = provinces['81'];
+            pcaaFillCsv(provinces['81'],'81');
+            pcaa['8101'] = provinces['8101'];
+            pcaaFillCsv(provinces['8101'],'8101');
+        }  else if (pcode === '82') {
+            // 澳门
+            pcaa['86']['82'] = provinces['82'];
+            pcaaFillCsv(provinces['82'],'82');
+            pcaa['8201'] = provinces['8201'];
+            pcaaFillCsv(provinces['8201'],'8201');
+        }else {
             const res = {};
             const pcities = cities.filter(city => city.parentCode === pcode);
             for(let c = 0, cl = pcities.length; c < cl; c++) {
@@ -151,49 +169,53 @@ async function formatPCAAddress () {
                     for(let i = 0, l = pareas.length; i < l; i++) {
                         const pCurAreas = {};
                         const parea = pareas[i];
-                        const code = formatCode(parea.code);
+                        const code = parea.code;
                         res[code] = parea.text.indexOf('办事处') > -1 ? parea.text.slice(0, -3) : parea.text;
 
-                        // 抓取第三级数据
+                        // 抓取第四级数据
                         let [err, data] = await awaitTo(getAreasByCCode(page, code, res[code]));
                         if (err) {
                             // 这个重试主要是处理因避免耗时(Navigation Timeout Exceeded)导致的错误
                             console.log('\n', chalk.red(`抓取数据失败，失败链接: ${url}，错误信息: ${err.message}，正在重试....\n`));
-                            [err, data] = await awaitTo(getAreasByCCode(page, code, res[code]));
+							i--;
+							continue;
                         }
                         spinner.succeed(chalk.green(`市级城市 ${res[code]} 的县区数据抓取完毕.`));
                         if (data.length) {
                             console.log('ddddd', data[0]);
                             data.forEach(item => {
                                 if (item.text !== '市辖区') {
-                                    pCurAreas[formatCode(item.code)] = item.text.indexOf('办事处') > -1 ? item.text.slice(0, -3) : item.text;
+                                    pCurAreas[item.code] = item.text.indexOf('办事处') > -1 ? item.text.slice(0, -3) : item.text;
                                 }
                             });
                             pcaa[code] = pCurAreas;
+                            pcaaFillCsv(pCurAreas,code);
                         }
-                        await timeout(1500);
+                        await timeout(1000);
                     }
                 } else {
                     const curAreas = {};
-                    const cityCode = formatCode(pcity.code);
+                    const cityCode = pcity.code;
                     res[cityCode] = pcity.text;
 
                     // 第三级数据
                     pareas.forEach(parea => {
                         if (parea.text !== '市辖区') {
-                            curAreas[formatCode(parea.code, pcity.text)] = parea.text.indexOf('办事处') > -1 ? parea.text.slice(0, -3) : parea.text;
+                            curAreas[parea.code] = parea.text.indexOf('办事处') > -1 ? parea.text.slice(0, -3) : parea.text;
                         }
                     });
                     pcaa[cityCode] = curAreas;
+                    pcaaFillCsv(curAreas,cityCode);
                 }
             }
             pcaa[pcode] = res;
+            pcaaFillCsv(res,pcode);
         }
     }
-
-    writeFileSync('pcaa.js', pcaa);
+    writeFileSync('pcaa_2023.js', pcaa);
+    // writeTextFileSync('pcaa.csv', pcaacsv.join('\n'));
     await browser.close();
 }
 
-formatPCAddress()
+formatPCAddress();
 formatPCAAddress();
